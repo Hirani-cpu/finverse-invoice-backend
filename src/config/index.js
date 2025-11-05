@@ -151,7 +151,11 @@ const config = {
 
 // Validation
 const validateConfig = () => {
-  const required = ['apiSecretKey'];
+  // Only validate API secret key in production if explicitly required
+  const required = [];
+  if (config.env === 'production' && process.env.REQUIRE_API_SECRET === 'true') {
+    required.push('apiSecretKey');
+  }
 
   const missing = required.filter(key => !config[key]);
 
