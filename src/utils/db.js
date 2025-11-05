@@ -144,7 +144,37 @@ function initializeTables() {
     });
 
     console.log('✓ Database initialization complete');
+
+    // Run migrations
+    runMigrations();
   });
+}
+
+async function runMigrations() {
+  const path = require('path');
+  const fs = require('fs');
+  const migrationsDir = path.join(__dirname, '../migrations');
+
+  try {
+    if (!fs.existsSync(migrationsDir)) {
+      console.log('No migrations directory found, skipping migrations');
+      return;
+    }
+
+    const migrationFiles = fs.readdirSync(migrationsDir)
+      .filter(f => f.endsWith('.js'))
+      .sort();
+
+    for (const file of migrationFiles) {
+      console.log(`Running migration: ${file}`);
+      const migration = require(path.join(migrationsDir, file));
+      await migration.up(dbOperations);
+    }
+
+    console.log('✓ All migrations complete');
+  } catch (err) {
+    console.error('Migration error:', err);
+  }
 }
 
 // Promisified database operations
