@@ -1,10 +1,9 @@
 /**
- * Invoice Worker - Processes email/SMS sending
- * PDF generation temporarily disabled
+ * Invoice Worker - Processes PDF generation and email/SMS sending
  */
 const invoiceQueue = require('../queue/invoiceQueue');
 const db = require('../utils/db');
-// const pdfGenerator = require('../services/pdfGenerator'); // Disabled temporarily
+const pdfGenerator = require('../services/pdfGeneratorSimple'); // Using PDFKit (no Chromium needed)
 const emailService = require('../services/emailService');
 const smsService = require('../services/smsService');
 const { generateSignedUrl } = require('../utils/urlSigning');
@@ -39,14 +38,65 @@ invoiceQueue.process('send-invoice', config.queue.concurrentJobs, async (job) =>
       return { skipped: true, reason: 'unsubscribed' };
     }
 
-    // Step 1: PDF generation temporarily disabled
-    // TODO: Re-enable after fixing Chromium/Puppeteer setup on Railway
+    // Step 1: Generate PDF using PDFKit (no Chromium needed!)
     job.progress(10);
     let pdfBuffer = null;
     let fileName = null;
     let invoiceUrl = null;
 
-    logger.info(`Skipping PDF generation for invoice ${invoiceId} - sending email only`);
+    try {
+      logger.info(`Generating PDF for invoice ${invoiceId} using PDFKit`);
+
+      // Prepare company data
+      const companyData = {
+        name: settings.company_name || 'Finverse',
+        email: settings.company_email || settings.email_from || 'noreply@finverse.info',
+        address: settings.company_address || '',
+        phone: settings.company_phone || '',
+      };
+
+      // Generate PDF buffer
+      pdfBuffer = await pdfGenerator.generateInvoicePDF(invoiceData, companyData);
+      fileName = `invoice-${invoiceData.invoiceNumber}.pdf`;
+
+      logger.info(`PDF generated: ${fileName} (${pdfBuffer.length} bytes)`);
+
+      job.progress(25);
+
+      // Save PDF to storage
+      const fileInfo = await pdfGenerator.savePDF(pdfBuffer, fileName);
+
+      // Generate signed URL (valid for configured days)
+      const signedUrl = generateSignedUrl(
+        `/api/invoices/${invoiceId}/pdf`,
+        settings.signed_url_expiry_days || 7
+      );
+      invoiceUrl = signedUrl;
+
+      // Save file record to database
+      await db.run(
+        `INSERT INTO invoice_files (invoice_id, file_name, file_path, file_size,
+         file_hash, storage_type, signed_url, generated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+        [
+          invoiceId,
+          fileInfo.fileName,
+          fileInfo.filePath,
+          fileInfo.fileSize,
+          fileInfo.fileHash,
+          fileInfo.storageType,
+          signedUrl,
+        ]
+      );
+
+      logger.info(`PDF saved and signed URL generated for invoice ${invoiceId}`);
+    } catch (pdfError) {
+      logger.error(`PDF generation failed for invoice ${invoiceId}:`, pdfError);
+      // Continue without PDF - email can still be sent
+      pdfBuffer = null;
+      fileName = null;
+      invoiceUrl = null;
+    }
 
     job.progress(40);
 
