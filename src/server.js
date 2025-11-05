@@ -61,6 +61,9 @@ app.use((err, req, res, next) => {
   });
 });
 
+// Initialize database (ensure tables are created before server starts)
+const db = require('./utils/db');
+
 // Load worker to register queue processors
 require('./workers/invoice-worker');
 

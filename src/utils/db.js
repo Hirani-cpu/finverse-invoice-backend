@@ -24,10 +24,10 @@ function getDatabase() {
         throw err;
       }
       console.log(`✓ Database connected: ${DB_PATH}`);
-
-      // Initialize tables
-      initializeTables();
     });
+
+    // Initialize tables immediately (synchronously)
+    initializeTables();
   }
   return db;
 }
@@ -102,32 +102,41 @@ function initializeTables() {
     )`
   ];
 
-  schemas.forEach((schema, index) => {
-    db.run(schema, (err) => {
-      if (err && !err.message.includes('already exists')) {
-        console.error(`Error creating table ${index + 1}:`, err);
-      }
-    });
-  });
+  // Use serialize to ensure all table creations complete before other queries
+  db.serialize(() => {
+    console.log('Initializing database tables...');
 
-  // Insert default settings if not exists
-  db.get('SELECT COUNT(*) as count FROM invoice_settings', (err, row) => {
-    if (!err && row.count === 0) {
-      const defaultSettings = `
-        INSERT INTO invoice_settings (
-          email_enabled, email_provider, email_from, email_from_name,
-          email_subject_template, auto_send_on_create
-        ) VALUES (
-          1, 'sendgrid', 'noreply@finverse.info', 'Finverse',
-          'Invoice {{invoice_number}}', 1
-        )
-      `;
-      db.run(defaultSettings, (err) => {
-        if (!err) {
-          console.log('✓ Default settings inserted');
+    schemas.forEach((schema, index) => {
+      db.run(schema, (err) => {
+        if (err && !err.message.includes('already exists')) {
+          console.error(`Error creating table ${index + 1}:`, err);
+        } else {
+          console.log(`✓ Table ${index + 1} ready`);
         }
       });
-    }
+    });
+
+    // Insert default settings if not exists
+    db.get('SELECT COUNT(*) as count FROM invoice_settings', (err, row) => {
+      if (!err && row && row.count === 0) {
+        const defaultSettings = `
+          INSERT INTO invoice_settings (
+            email_enabled, email_provider, email_from, email_from_name,
+            email_subject_template, auto_send_on_create
+          ) VALUES (
+            1, 'sendgrid', 'noreply@finverse.info', 'Finverse',
+            'Invoice {{invoice_number}}', 1
+          )
+        `;
+        db.run(defaultSettings, (err) => {
+          if (!err) {
+            console.log('✓ Default settings inserted');
+          }
+        });
+      }
+    });
+
+    console.log('✓ Database initialization complete');
   });
 }
 
