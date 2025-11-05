@@ -5,7 +5,7 @@ const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
 
-const DB_PATH = process.env.DB_PATH || './data/invoices.db';
+const DB_PATH = process.env.DB_PATH || './data/invoices_v2.db'; // v2 for updated schema
 
 let db;
 
