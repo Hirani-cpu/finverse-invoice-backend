@@ -21,15 +21,24 @@ class PDFGenerator {
    */
   async init() {
     if (!this.browser) {
-      this.browser = await puppeteer.launch({
+      const launchOptions = {
         headless: 'new',
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
+          '--disable-gpu',
         ],
-        executablePath: config.pdf.puppeteerExecutablePath || undefined,
-      });
+      };
+
+      // Use system Chromium in production/Railway environment
+      if (process.env.NODE_ENV === 'production' || process.env.RAILWAY_ENVIRONMENT) {
+        launchOptions.executablePath = '/usr/bin/chromium';
+      } else if (config.pdf.puppeteerExecutablePath) {
+        launchOptions.executablePath = config.pdf.puppeteerExecutablePath;
+      }
+
+      this.browser = await puppeteer.launch(launchOptions);
       logger.info('PDF Generator: Browser initialized');
     }
     return this.browser;
