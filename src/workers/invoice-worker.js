@@ -1,0 +1,176 @@
+/**
+ * Invoice Worker - Processes PDF generation and email/SMS sending
+ */
+const invoiceQueue = require('../queue/invoiceQueue');
+const db = require('../utils/db');
+const pdfGenerator = require('../services/pdfGenerator');
+const emailService = require('../services/emailService');
+const smsService = require('../services/smsService');
+const { generateSignedUrl } = require('../utils/urlSigning');
+const config = require('../config');
+const logger = require('../utils/logger');
+
+// Process invoice sending jobs
+invoiceQueue.process('send-invoice', config.queue.concurrentJobs, async (job) => {
+  const { invoiceId, invoiceData, triggeredBy, triggerType } = job.data;
+
+  logger.info(`Processing invoice ${invoiceId}`, { jobId: job.id });
+
+  try {
+    // Get settings
+    const settings = await db.get('SELECT * FROM invoice_settings WHERE id = 1');
+
+    // Get customer preferences
+    const prefs = await db.get(
+      'SELECT * FROM customer_preferences WHERE customer_email = ?',
+      [invoiceData.customerEmail]
+    );
+
+    // Check consent
+    if (prefs?.email_unsubscribed) {
+      logger.warn(`Customer ${invoiceData.customerEmail} has unsubscribed`);
+      return { skipped: true, reason: 'unsubscribed' };
+    }
+
+    // Step 1: Generate PDF
+    job.progress(10);
+    const pdfBuffer = await pdfGenerator.generateInvoicePDF(
+      invoiceData,
+      { name: settings.company_name, /* ... */ }
+    );
+
+    const fileName = `Invoice_${invoiceData.invoiceNumber}_${Date.now()}.pdf`;
+    const fileInfo = await pdfGenerator.savePDF(pdfBuffer, fileName);
+
+    // Save file record
+    await db.run(
+      `INSERT INTO invoice_files (invoice_id, file_name, file_path, file_size,
+       file_hash, storage_type, generated_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
+      [invoiceId, fileInfo.fileName, fileInfo.filePath, fileInfo.fileSize,
+       fileInfo.fileHash, fileInfo.storageType]
+    );
+
+    // Generate signed URL
+    const invoiceUrl = `${config.appUrl}/api/invoices/${invoiceId}/pdf?token=${generateSignedUrl(invoiceId)}`;
+
+    job.progress(40);
+
+    // Step 2: Send Email
+    if (settings.email_enabled && invoiceData.customerEmail) {
+      const emailLog = await db.run(
+        `INSERT INTO send_logs (invoice_id, send_type, recipient, provider,
+         status, triggered_by, trigger_type, queued_at)
+         VALUES (?, 'email', ?, ?, 'sending', ?, ?, datetime('now'))`,
+        [invoiceId, invoiceData.customerEmail, settings.email_provider, triggeredBy, triggerType]
+      );
+
+      try {
+        await emailService.init(settings);
+
+        const result = await emailService.sendInvoiceEmail({
+          to: invoiceData.customerEmail,
+          customerName: invoiceData.customerName,
+          invoiceData,
+          pdfBuffer,
+          pdfFileName: fileName,
+          invoiceUrl,
+          unsubscribeUrl: `${config.appUrl}/unsubscribe?token=${prefs?.unsubscribe_token || ''}`,
+          settings,
+        });
+
+        await db.run(
+          `UPDATE send_logs SET status = 'sent', provider_message_id = ?,
+           provider_response = ?, sent_at = datetime('now') WHERE id = ?`,
+          [result.messageId, JSON.stringify(result.response), emailLog.lastID]
+        );
+
+        await db.run(
+          'UPDATE invoices SET email_sent = 1, email_sent_at = datetime(\'now\') WHERE id = ?',
+          [invoiceId]
+        );
+
+        logger.info(`Email sent for invoice ${invoiceId}`, { messageId: result.messageId });
+      } catch (error) {
+        await db.run(
+          `UPDATE send_logs SET status = 'failed', error_message = ?,
+           error_code = ?, failed_at = datetime('now') WHERE id = ?`,
+          [error.error, error.errorCode, emailLog.lastID]
+        );
+        throw error;
+      }
+    }
+
+    job.progress(70);
+
+    // Step 3: Send SMS
+    if (settings.sms_enabled && invoiceData.customerPhone && prefs?.sms_opt_in) {
+      const smsLog = await db.run(
+        `INSERT INTO send_logs (invoice_id, send_type, recipient, provider,
+         status, triggered_by, trigger_type, queued_at)
+         VALUES (?, 'sms', ?, ?, 'sending', ?, ?, datetime('now'))`,
+        [invoiceId, invoiceData.customerPhone, settings.sms_provider, triggeredBy, triggerType]
+      );
+
+      try {
+        await smsService.init(settings);
+
+        const result = await smsService.sendInvoiceSMS({
+          to: invoiceData.customerPhone,
+          customerName: invoiceData.customerName,
+          invoiceData,
+          invoiceUrl,
+          settings,
+        });
+
+        await db.run(
+          `UPDATE send_logs SET status = 'sent', provider_message_id = ?,
+           sent_at = datetime('now') WHERE id = ?`,
+          [result.messageId, smsLog.lastID]
+        );
+
+        await db.run(
+          'UPDATE invoices SET sms_sent = 1, sms_sent_at = datetime(\'now\') WHERE id = ?',
+          [invoiceId]
+        );
+
+        logger.info(`SMS sent for invoice ${invoiceId}`);
+      } catch (error) {
+        await db.run(
+          `UPDATE send_logs SET status = 'failed', error_message = ?,
+           failed_at = datetime('now') WHERE id = ?`,
+          [error.error, smsLog.lastID]
+        );
+        // Don't throw - email success is enough
+        logger.error(`SMS failed for invoice ${invoiceId}:`, error);
+      }
+    }
+
+    job.progress(100);
+
+    await db.run(
+      'UPDATE invoices SET send_status = \'sent\' WHERE id = ?',
+      [invoiceId]
+    );
+
+    return { success: true, invoiceId, fileName };
+  } catch (error) {
+    logger.error(`Invoice ${invoiceId} processing failed:`, error);
+
+    await db.run(
+      'UPDATE invoices SET send_status = \'failed\' WHERE id = ?',
+      [invoiceId]
+    );
+
+    throw error;
+  }
+});
+
+logger.info('Invoice worker started');
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  logger.info('SIGTERM received, closing worker...');
+  await invoiceQueue.close();
+  await pdfGenerator.close();
+  process.exit(0);
+});
