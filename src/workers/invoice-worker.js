@@ -12,7 +12,7 @@ const logger = require('../utils/logger');
 
 // Process invoice sending jobs
 invoiceQueue.process('send-invoice', config.queue.concurrentJobs, async (job) => {
-  const { invoiceId, invoiceData, triggeredBy, triggerType } = job.data;
+  const { invoiceId, invoiceData, pdfBuffer: uploadedPdfBuffer, triggeredBy, triggerType } = job.data;
 
   logger.info(`Processing invoice ${invoiceId}`, { jobId: job.id });
 
@@ -38,28 +38,35 @@ invoiceQueue.process('send-invoice', config.queue.concurrentJobs, async (job) =>
       return { skipped: true, reason: 'unsubscribed' };
     }
 
-    // Step 1: Generate PDF using PDFKit (no Chromium needed!)
+    // Step 1: Use uploaded PDF or generate one
     job.progress(10);
     let pdfBuffer = null;
     let fileName = null;
     let invoiceUrl = null;
 
     try {
-      logger.info(`Generating PDF for invoice ${invoiceId} using PDFKit`);
-
-      // Prepare company data
-      const companyData = {
-        name: settings.company_name || 'Finverse',
-        email: settings.company_email || settings.email_from || 'noreply@finverse.info',
-        address: settings.company_address || '',
-        phone: settings.company_phone || '',
-      };
-
-      // Generate PDF buffer
-      pdfBuffer = await pdfGenerator.generateInvoicePDF(invoiceData, companyData);
       fileName = `invoice-${invoiceData.invoiceNumber}.pdf`;
 
-      logger.info(`PDF generated: ${fileName} (${pdfBuffer.length} bytes)`);
+      if (uploadedPdfBuffer) {
+        // Use PDF uploaded from Flutter app
+        logger.info(`Using uploaded PDF for invoice ${invoiceId} (${uploadedPdfBuffer.length} bytes)`);
+        pdfBuffer = uploadedPdfBuffer;
+      } else {
+        // Fallback: Generate PDF using PDFKit
+        logger.info(`Generating PDF for invoice ${invoiceId} using PDFKit`);
+
+        // Prepare company data
+        const companyData = {
+          name: settings.company_name || 'Finverse',
+          email: settings.company_email || settings.email_from || 'noreply@finverse.info',
+          address: settings.company_address || '',
+          phone: settings.company_phone || '',
+        };
+
+        // Generate PDF buffer
+        pdfBuffer = await pdfGenerator.generateInvoicePDF(invoiceData, companyData);
+        logger.info(`PDF generated: ${fileName} (${pdfBuffer.length} bytes)`);
+      }
 
       job.progress(25);
 
@@ -91,7 +98,7 @@ invoiceQueue.process('send-invoice', config.queue.concurrentJobs, async (job) =>
 
       logger.info(`PDF saved and signed URL generated for invoice ${invoiceId}`);
     } catch (pdfError) {
-      logger.error(`PDF generation failed for invoice ${invoiceId}:`, pdfError);
+      logger.error(`PDF handling failed for invoice ${invoiceId}:`, pdfError);
       // Continue without PDF - but still generate view URL for email
       pdfBuffer = null;
       fileName = null;
