@@ -47,6 +47,10 @@ function initializeTables() {
       dueDate TEXT,
       items TEXT,
       send_status TEXT DEFAULT 'pending',
+      email_sent INTEGER DEFAULT 0,
+      email_sent_at DATETIME,
+      sms_sent INTEGER DEFAULT 0,
+      sms_sent_at DATETIME,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`,
