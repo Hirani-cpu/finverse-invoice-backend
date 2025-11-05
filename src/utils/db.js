@@ -3,6 +3,7 @@
  */
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
+const fs = require('fs');
 
 const DB_PATH = process.env.DB_PATH || './data/invoices.db';
 
@@ -10,12 +11,19 @@ let db;
 
 function getDatabase() {
   if (!db) {
+    // Ensure database directory exists
+    const dbDir = path.dirname(DB_PATH);
+    if (!fs.existsSync(dbDir)) {
+      fs.mkdirSync(dbDir, { recursive: true });
+      console.log(`✓ Created database directory: ${dbDir}`);
+    }
+
     db = new sqlite3.Database(DB_PATH, (err) => {
       if (err) {
         console.error('Database connection error:', err);
         throw err;
       }
-      console.log('✓ Database connected');
+      console.log(`✓ Database connected: ${DB_PATH}`);
     });
   }
   return db;

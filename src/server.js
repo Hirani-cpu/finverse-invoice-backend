@@ -13,6 +13,9 @@ const invoiceRoutes = require('./routes/invoices');
 
 const app = express();
 
+// Trust Railway proxy for rate limiting and client IP detection
+app.set('trust proxy', 1);
+
 // Security middleware
 app.use(helmet());
 app.use(cors({
