@@ -38,26 +38,37 @@ invoiceQueue.process('send-invoice', config.queue.concurrentJobs, async (job) =>
       return { skipped: true, reason: 'unsubscribed' };
     }
 
-    // Step 1: Generate PDF
+    // Step 1: Generate PDF (optional - will send email without PDF if this fails)
     job.progress(10);
-    const pdfBuffer = await pdfGenerator.generateInvoicePDF(
-      invoiceData,
-      { name: settings.company_name, /* ... */ }
-    );
+    let pdfBuffer = null;
+    let fileName = null;
+    let invoiceUrl = null;
 
-    const fileName = `Invoice_${invoiceData.invoiceNumber}_${Date.now()}.pdf`;
-    const fileInfo = await pdfGenerator.savePDF(pdfBuffer, fileName);
+    try {
+      pdfBuffer = await pdfGenerator.generateInvoicePDF(
+        invoiceData,
+        { name: settings.company_name || 'Finverse', email: settings.email_from }
+      );
 
-    // Save file record
-    await db.run(
-      `INSERT INTO invoice_files (invoice_id, file_name, file_path, file_size,
-       file_hash, storage_type, generated_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
-      [invoiceId, fileInfo.fileName, fileInfo.filePath, fileInfo.fileSize,
-       fileInfo.fileHash, fileInfo.storageType]
-    );
+      fileName = `Invoice_${invoiceData.invoiceNumber}_${Date.now()}.pdf`;
+      const fileInfo = await pdfGenerator.savePDF(pdfBuffer, fileName);
 
-    // Generate signed URL
-    const invoiceUrl = `${config.appUrl}/api/invoices/${invoiceId}/pdf?token=${generateSignedUrl(invoiceId)}`;
+      // Save file record
+      await db.run(
+        `INSERT INTO invoice_files (invoice_id, file_name, file_path, file_size,
+         file_hash, storage_type, generated_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
+        [invoiceId, fileInfo.fileName, fileInfo.filePath, fileInfo.fileSize,
+         fileInfo.fileHash, fileInfo.storageType]
+      );
+
+      // Generate signed URL
+      invoiceUrl = `${config.appUrl}/api/invoices/${invoiceId}/pdf?token=${generateSignedUrl(invoiceId)}`;
+
+      logger.info(`PDF generated successfully for invoice ${invoiceId}`);
+    } catch (pdfError) {
+      logger.warn(`PDF generation failed for invoice ${invoiceId}, will send email without PDF: ${pdfError.message}`);
+      // Continue without PDF - we'll still send the email
+    }
 
     job.progress(40);
 
