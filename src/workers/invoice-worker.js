@@ -67,11 +67,11 @@ invoiceQueue.process('send-invoice', config.queue.concurrentJobs, async (job) =>
       const fileInfo = await pdfGenerator.savePDF(pdfBuffer, fileName);
 
       // Generate signed URL for viewing invoice online (valid for configured days)
-      const signedUrl = generateSignedUrl(
-        `/api/invoices/${invoiceId}/view`,
+      const token = generateSignedUrl(
+        invoiceId,
         settings.signed_url_expiry_days || 7
       );
-      invoiceUrl = signedUrl;
+      invoiceUrl = `${config.appUrl}/api/invoices/${invoiceId}/view?token=${token}`;
 
       // Save file record to database
       await db.run(
@@ -85,7 +85,7 @@ invoiceQueue.process('send-invoice', config.queue.concurrentJobs, async (job) =>
           fileInfo.fileSize,
           fileInfo.fileHash,
           fileInfo.storageType,
-          signedUrl,
+          invoiceUrl,
         ]
       );
 
