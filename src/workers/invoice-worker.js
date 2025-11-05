@@ -92,10 +92,17 @@ invoiceQueue.process('send-invoice', config.queue.concurrentJobs, async (job) =>
       logger.info(`PDF saved and signed URL generated for invoice ${invoiceId}`);
     } catch (pdfError) {
       logger.error(`PDF generation failed for invoice ${invoiceId}:`, pdfError);
-      // Continue without PDF - email can still be sent
+      // Continue without PDF - but still generate view URL for email
       pdfBuffer = null;
       fileName = null;
-      invoiceUrl = null;
+
+      // Generate view URL anyway (even without PDF)
+      const token = generateSignedUrl(
+        invoiceId,
+        settings.signed_url_expiry_days || 7
+      );
+      invoiceUrl = `${config.appUrl}/api/invoices/${invoiceId}/view?token=${token}`;
+      logger.info(`View URL generated despite PDF failure: ${invoiceUrl}`);
     }
 
     job.progress(40);
