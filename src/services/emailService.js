@@ -117,14 +117,6 @@ class EmailService {
         subject,
         html: htmlBody,
         text: textBody,
-        attachments: [
-          {
-            content: pdfBuffer.toString('base64'),
-            filename: pdfFileName,
-            type: 'application/pdf',
-            disposition: 'attachment',
-          },
-        ],
         customArgs: {
           invoice_id: String(invoiceData.id),
           invoice_number: invoiceData.invoiceNumber,
@@ -134,6 +126,18 @@ class EmailService {
           openTracking: { enable: config.features.emailTracking },
         },
       };
+
+      // Only add PDF attachment if buffer exists
+      if (pdfBuffer) {
+        emailData.attachments = [
+          {
+            content: pdfBuffer.toString('base64'),
+            filename: pdfFileName,
+            type: 'application/pdf',
+            disposition: 'attachment',
+          },
+        ];
+      }
 
       // Send based on provider
       let result;
