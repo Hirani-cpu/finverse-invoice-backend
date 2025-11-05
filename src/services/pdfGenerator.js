@@ -21,6 +21,7 @@ class PDFGenerator {
    */
   async init() {
     if (!this.browser) {
+      const fs = require('fs');
       const launchOptions = {
         headless: 'new',
         args: [
@@ -31,9 +32,28 @@ class PDFGenerator {
         ],
       };
 
-      // Use system Chromium in production/Railway environment
+      // Try to find system Chromium in production/Railway environment
       if (process.env.NODE_ENV === 'production' || process.env.RAILWAY_ENVIRONMENT) {
-        launchOptions.executablePath = '/usr/bin/chromium';
+        const possiblePaths = [
+          '/usr/bin/chromium',
+          '/usr/bin/chromium-browser',
+          '/usr/bin/google-chrome',
+          '/usr/bin/google-chrome-stable',
+          process.env.CHROME_BIN,
+        ].filter(Boolean);
+
+        for (const execPath of possiblePaths) {
+          if (fs.existsSync(execPath)) {
+            launchOptions.executablePath = execPath;
+            logger.info(`Using Chromium at: ${execPath}`);
+            break;
+          }
+        }
+
+        // If no system Chrome found, let Puppeteer use its bundled version
+        if (!launchOptions.executablePath) {
+          logger.warn('No system Chromium found, using Puppeteer bundled version');
+        }
       } else if (config.pdf.puppeteerExecutablePath) {
         launchOptions.executablePath = config.pdf.puppeteerExecutablePath;
       }
