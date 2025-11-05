@@ -1,9 +1,10 @@
 /**
- * Invoice Worker - Processes PDF generation and email/SMS sending
+ * Invoice Worker - Processes email/SMS sending
+ * PDF generation temporarily disabled
  */
 const invoiceQueue = require('../queue/invoiceQueue');
 const db = require('../utils/db');
-const pdfGenerator = require('../services/pdfGenerator');
+// const pdfGenerator = require('../services/pdfGenerator'); // Disabled temporarily
 const emailService = require('../services/emailService');
 const smsService = require('../services/smsService');
 const { generateSignedUrl } = require('../utils/urlSigning');
@@ -38,37 +39,14 @@ invoiceQueue.process('send-invoice', config.queue.concurrentJobs, async (job) =>
       return { skipped: true, reason: 'unsubscribed' };
     }
 
-    // Step 1: Generate PDF (optional - will send email without PDF if this fails)
+    // Step 1: PDF generation temporarily disabled
+    // TODO: Re-enable after fixing Chromium/Puppeteer setup on Railway
     job.progress(10);
     let pdfBuffer = null;
     let fileName = null;
     let invoiceUrl = null;
 
-    try {
-      pdfBuffer = await pdfGenerator.generateInvoicePDF(
-        invoiceData,
-        { name: settings.company_name || 'Finverse', email: settings.email_from }
-      );
-
-      fileName = `Invoice_${invoiceData.invoiceNumber}_${Date.now()}.pdf`;
-      const fileInfo = await pdfGenerator.savePDF(pdfBuffer, fileName);
-
-      // Save file record
-      await db.run(
-        `INSERT INTO invoice_files (invoice_id, file_name, file_path, file_size,
-         file_hash, storage_type, generated_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
-        [invoiceId, fileInfo.fileName, fileInfo.filePath, fileInfo.fileSize,
-         fileInfo.fileHash, fileInfo.storageType]
-      );
-
-      // Generate signed URL
-      invoiceUrl = `${config.appUrl}/api/invoices/${invoiceId}/pdf?token=${generateSignedUrl(invoiceId)}`;
-
-      logger.info(`PDF generated successfully for invoice ${invoiceId}`);
-    } catch (pdfError) {
-      logger.warn(`PDF generation failed for invoice ${invoiceId}, will send email without PDF: ${pdfError.message}`);
-      // Continue without PDF - we'll still send the email
-    }
+    logger.info(`Skipping PDF generation for invoice ${invoiceId} - sending email only`);
 
     job.progress(40);
 
@@ -188,6 +166,6 @@ logger.info('Invoice worker started');
 process.on('SIGTERM', async () => {
   logger.info('SIGTERM received, closing worker...');
   await invoiceQueue.close();
-  await pdfGenerator.close();
+  // await pdfGenerator.close(); // Disabled temporarily
   process.exit(0);
 });
