@@ -24,9 +24,111 @@ function getDatabase() {
         throw err;
       }
       console.log(`✓ Database connected: ${DB_PATH}`);
+
+      // Initialize tables
+      initializeTables();
     });
   }
   return db;
+}
+
+function initializeTables() {
+  const schemas = [
+    // invoices table
+    `CREATE TABLE IF NOT EXISTS invoices (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      invoiceNumber TEXT NOT NULL UNIQUE,
+      customerName TEXT NOT NULL,
+      customerEmail TEXT,
+      customerPhone TEXT,
+      grandTotal REAL NOT NULL,
+      currency TEXT DEFAULT 'USD',
+      invoiceDate TEXT,
+      dueDate TEXT,
+      items TEXT,
+      send_status TEXT DEFAULT 'pending',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`,
+
+    // invoice_settings table
+    `CREATE TABLE IF NOT EXISTS invoice_settings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email_enabled INTEGER DEFAULT 1,
+      email_provider TEXT DEFAULT 'sendgrid',
+      email_from TEXT,
+      email_from_name TEXT,
+      email_subject_template TEXT,
+      email_body_template TEXT,
+      sms_enabled INTEGER DEFAULT 0,
+      sms_provider TEXT DEFAULT 'twilio',
+      sms_template TEXT,
+      auto_send_on_create INTEGER DEFAULT 1,
+      signed_url_expiry_days INTEGER DEFAULT 7,
+      max_retry_attempts INTEGER DEFAULT 3,
+      retry_delay_minutes INTEGER DEFAULT 5,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`,
+
+    // send_logs table
+    `CREATE TABLE IF NOT EXISTS send_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      invoice_id INTEGER NOT NULL,
+      send_type TEXT NOT NULL,
+      status TEXT NOT NULL,
+      provider TEXT,
+      provider_message_id TEXT,
+      sent_at DATETIME,
+      delivered_at DATETIME,
+      opened_at DATETIME,
+      error_message TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (invoice_id) REFERENCES invoices(id)
+    )`,
+
+    // invoice_files table
+    `CREATE TABLE IF NOT EXISTS invoice_files (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      invoice_id INTEGER NOT NULL,
+      file_name TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      file_size INTEGER,
+      file_hash TEXT,
+      storage_type TEXT DEFAULT 'local',
+      signed_url TEXT,
+      generated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (invoice_id) REFERENCES invoices(id)
+    )`
+  ];
+
+  schemas.forEach((schema, index) => {
+    db.run(schema, (err) => {
+      if (err && !err.message.includes('already exists')) {
+        console.error(`Error creating table ${index + 1}:`, err);
+      }
+    });
+  });
+
+  // Insert default settings if not exists
+  db.get('SELECT COUNT(*) as count FROM invoice_settings', (err, row) => {
+    if (!err && row.count === 0) {
+      const defaultSettings = `
+        INSERT INTO invoice_settings (
+          email_enabled, email_provider, email_from, email_from_name,
+          email_subject_template, auto_send_on_create
+        ) VALUES (
+          1, 'sendgrid', 'noreply@finverse.info', 'Finverse',
+          'Invoice {{invoice_number}}', 1
+        )
+      `;
+      db.run(defaultSettings, (err) => {
+        if (!err) {
+          console.log('✓ Default settings inserted');
+        }
+      });
+    }
+  });
 }
 
 // Promisified database operations
