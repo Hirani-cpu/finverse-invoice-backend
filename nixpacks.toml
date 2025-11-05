@@ -1,5 +1,6 @@
 [phases.setup]
-nixPkgs = ["nodejs_20", "chromium"]
+nixPkgs = ["nodejs_20"]
+aptPkgs = ["chromium"]
 
 [phases.install]
 cmds = ["npm install"]
