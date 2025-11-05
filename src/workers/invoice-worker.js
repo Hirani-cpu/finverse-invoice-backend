@@ -66,9 +66,9 @@ invoiceQueue.process('send-invoice', config.queue.concurrentJobs, async (job) =>
       // Save PDF to storage
       const fileInfo = await pdfGenerator.savePDF(pdfBuffer, fileName);
 
-      // Generate signed URL (valid for configured days)
+      // Generate signed URL for viewing invoice online (valid for configured days)
       const signedUrl = generateSignedUrl(
-        `/api/invoices/${invoiceId}/pdf`,
+        `/api/invoices/${invoiceId}/view`,
         settings.signed_url_expiry_days || 7
       );
       invoiceUrl = signedUrl;
