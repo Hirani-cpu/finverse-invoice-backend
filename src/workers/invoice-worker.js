@@ -20,11 +20,17 @@ invoiceQueue.process('send-invoice', config.queue.concurrentJobs, async (job) =>
     // Get settings
     const settings = await db.get('SELECT * FROM invoice_settings WHERE id = 1');
 
-    // Get customer preferences
-    const prefs = await db.get(
-      'SELECT * FROM customer_preferences WHERE customer_email = ?',
-      [invoiceData.customerEmail]
-    );
+    // Get customer preferences (optional - table may not exist)
+    let prefs = null;
+    try {
+      prefs = await db.get(
+        'SELECT * FROM customer_preferences WHERE customer_email = ?',
+        [invoiceData.customerEmail]
+      );
+    } catch (err) {
+      // Table doesn't exist yet - that's okay, proceed without preferences
+      logger.debug('Customer preferences table not found, proceeding without preference check');
+    }
 
     // Check consent
     if (prefs?.email_unsubscribed) {
